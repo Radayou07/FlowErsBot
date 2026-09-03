@@ -1,0 +1,11 @@
+# Telegram Bot Framework
+python-telegram-bot>=21.0
+
+# Google GenAI Official SDK
+google-genai>=2.0.0
+
+# Search Engines (Tavily API + DDGS fallback)
+tavily-python>=0.7.0
+
+# Environment variables management
+python-dotenv>=1.0.0
