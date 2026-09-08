@@ -1,6 +1,8 @@
 import asyncio
 import os
 import re
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Any, Dict, Optional
 from dotenv import load_dotenv
 from telegram import (
@@ -1430,8 +1432,36 @@ def build_application() -> Application:
     return app
 
 
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    """Simple HTTP handler so Render detects an active Web Service."""
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"FLOWER Telegram Bot is running!")
+
+    def log_message(self, format, *args):
+        # Silence HTTP access logs to keep terminal / logs clean
+        return
+
+
+def run_health_server():
+    """Runs a lightweight background HTTP server on the port provided by Render."""
+    port = int(os.getenv("PORT", 10000))
+    try:
+        server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+        print(f"🌐 Health server listening on 0.0.0.0:{port}", flush=True)
+        server.serve_forever()
+    except Exception as e:
+        print(f"⚠️ Health server warning: {e}", flush=True)
+
+
 if __name__ == "__main__":
-    print("🚀 FLOWER Maternal Companion Telegram Bot is starting...")
+    # Start health check server unconditionally in background thread for Render Web Service
+    health_thread = threading.Thread(target=run_health_server, daemon=True)
+    health_thread.start()
+
+    print("🚀 FLOWER Maternal Companion Telegram Bot is starting...", flush=True)
     app = build_application()
-    print("🤖 Bot is live and listening for messages (Zero-schema & Button-driven)...")
+    print("🤖 Bot is live and listening for messages (Zero-schema & Button-driven)...", flush=True)
     app.run_polling(drop_pending_updates=True, poll_interval=1)
