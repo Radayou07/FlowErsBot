@@ -4,8 +4,15 @@ python-telegram-bot>=21.0
 # Google GenAI Official SDK
 google-genai>=2.0.0
 
-# Search Engines (Tavily API + DDGS fallback)
+# Search Engines (Tavily API)
 tavily-python>=0.7.0
+
+# MySQL Database Driver (Zero schema changes needed)
+pymysql>=1.1.0
+cryptography>=41.0.0
+
+# Image handling for medical photo scanning
+pillow>=10.0.0
 
 # Environment variables management
 python-dotenv>=1.0.0
