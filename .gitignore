@@ -4,3 +4,5 @@ __pycache__/
 *.pyc
 uploads/
 termina.py
+TODO.md
+database.db
