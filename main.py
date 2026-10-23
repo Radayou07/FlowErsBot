@@ -3,6 +3,9 @@ import os
 import re
 import threading
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
+CAMBODIA_TZ = ZoneInfo("Asia/Phnom_Penh")
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Any, Dict, Optional
 from dotenv import load_dotenv
@@ -62,47 +65,24 @@ ALL_VOICES = {
 
 
 async def handle_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles the Reminders button: displays upcoming appointments and sends test voice reminder (configured in seconds for testing)."""
+    """Handles the Reminders button: sends the weekly pregnancy voice guidance to the chat."""
     user_id = update.effective_user.id
     session = get_user_session(user_id)
     lang = session["lang"]
     mother_id = session.get("mother_id") or db.get_linked_mother_id(user_id)
 
     if not mother_id:
-        await send_connect_prompt(update, context, "ការរំលឹក និងការណាត់ជួប", "Reminders & Appointments")
+        await send_connect_prompt(update, context, "ការរំលឹក", "Reminders")
         return
 
     session["mother_id"] = mother_id
     profile = db.get_mother_full_profile(mother_id)
     week = profile.get("current_week", 1) if profile else 1
-    appts = db.get_mother_appointments(mother_id)
-
-    if lang == "kh":
-        msg = f"⏰ *ការរំលឹកសុខភាព & គភ៌ (សប្តាហ៍ទី {week})*\n\n"
-        if appts:
-            msg += "📅 *ការណាត់ជួបបន្ទាប់៖*\n"
-            for a in appts[:2]:
-                msg += f"• *{a.get('title')}* ថ្ងៃ {a.get('date')} ម៉ោង {a.get('time', '09:00')}\n"
-        else:
-            msg += "📅 មិនមានការណាត់ជួបថ្មីៗទេ។\n"
-        msg += f"\n🎙️ *សារសំឡេងសប្តាហ៍ទី {week} របស់អ្នកត្រូវបានកំណត់ពេលរួចរាល់។*"
-    else:
-        msg = f"⏰ *Health & Pregnancy Reminders (Week {week})*\n\n"
-        if appts:
-            msg += "📅 *Upcoming Appointments:*\n"
-            for a in appts[:2]:
-                msg += f"• *{a.get('title')}* on {a.get('date')} at {a.get('time', '09:00')}\n"
-        else:
-            msg += "📅 No upcoming appointments scheduled.\n"
-        msg += f"\n🎙️ *Your Week {week} Voice Reminder is scheduled.*"
-
-    await update.message.reply_text(msg, parse_mode="Markdown")
 
     # Find exact week voice, or fallback to the closest previous available week
     available_weeks = sorted(ALL_VOICES.keys())
     matched_week = week
     if week not in ALL_VOICES:
-        # Find highest available week <= current week
         lower_weeks = [w for w in available_weeks if w <= week]
         if lower_weeks:
             matched_week = max(lower_weeks)
@@ -111,7 +91,6 @@ async def handle_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     voice_file_id = ALL_VOICES.get(matched_week)
 
-    # Immediately send the voice message when Reminders button is pressed
     try:
         await context.bot.send_voice(
             chat_id=update.effective_chat.id,
@@ -120,6 +99,9 @@ async def handle_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     except Exception as e:
         print(f"Error sending voice: {e}")
+        await update.message.reply_text(
+            "❌ Failed to send voice reminder." if lang != "kh" else "❌ មានបញ្ហាក្នុងការផ្ញើសារសំឡេង។"
+        )
 
 # -------------------------------------------------------------
 # Permanent Reply Keyboards (Per TODO.md)
@@ -128,14 +110,12 @@ MENUS = {
     "en": [
         [KeyboardButton("📊 My Progress"), KeyboardButton("📸 Scan Medical Photo")],
         [KeyboardButton("❓ Pregnancy FAQ"), KeyboardButton("📅 Appointments")],
-        [KeyboardButton("➕ Add Appointment"), KeyboardButton("📋 Show Appointments")],
         [KeyboardButton("⏰ Reminders"), KeyboardButton("🚨 Emergency SOS")],
         [KeyboardButton("🌐 Change Language")],
     ],
     "kh": [
         [KeyboardButton("📊 ការវិវត្តរបស់គភ៌"), KeyboardButton("📸 ស្កេនរូបភាពវេជ្ជសាស្ត្រ")],
         [KeyboardButton("❓ សំណួរញឹកញាប់ (FAQ)"), KeyboardButton("📅 ការណាត់ជួប")],
-        [KeyboardButton("➕ បន្ថែមការណាត់ជួប"), KeyboardButton("📋 មើលការណាត់ជួប")],
         [KeyboardButton("⏰ ការរំលឹក"), KeyboardButton("🚨 សង្គ្រោះបន្ទាន់ (SOS)")],
         [KeyboardButton("🌐 ប្តូរភាសា")],
     ],
@@ -516,15 +496,6 @@ async def handle_my_progress(update: Update, context: ContextTypes.DEFAULT_TYPE)
             f"• ប្រភេទឈាម៖ *{blood_type}* | ទម្ងន់បច្ចុប្បន្ន៖ *{weight} kg*\n"
             f"• ប្រវត្តិប្រតិកម្មថ្នាំ៖ *{allergies}*\n"
         )
-        quick_btns = [
-            [
-                InlineKeyboardButton("📸 ស្កេនរូបភាពវេជ្ជសាស្ត្រ", callback_data="prompt_scan_photo"),
-                InlineKeyboardButton("📝 កត់ត្រាទម្ងន់/រោគសញ្ញា", callback_data="prompt_log_menu"),
-            ],
-            [
-                InlineKeyboardButton("📅 មើលការណាត់ជួប", callback_data="view_appointments_inline"),
-            ]
-        ]
     else:
         progress_card = (
             f"🌸 *Pregnancy Progress & Milestones* 🌸\n\n"
@@ -538,20 +509,9 @@ async def handle_my_progress(update: Update, context: ContextTypes.DEFAULT_TYPE)
             f"• Blood Type: *{blood_type}* | Current Weight: *{weight} kg*\n"
             f"• Allergies: *{allergies}*\n"
         )
-        quick_btns = [
-            [
-                InlineKeyboardButton("📸 Scan Medical Photo", callback_data="prompt_scan_photo"),
-                InlineKeyboardButton("📝 Log Weight / Symptom", callback_data="prompt_log_menu"),
-            ],
-            [
-                InlineKeyboardButton("📅 View Appointments", callback_data="view_appointments_inline"),
-            ]
-        ]
-
     await update.message.reply_text(
         progress_card,
         parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup(quick_btns),
     )
 
 
@@ -1178,7 +1138,7 @@ async def handle_appt_show_list(update: Update, context: ContextTypes.DEFAULT_TY
         return
 
     appts = db.get_mother_appointments(mother_id)
-    today = datetime.now().date()
+    today = datetime.now(CAMBODIA_TZ).date()
     tomorrow = today + timedelta(days=1)
     tomorrow_str = tomorrow.strftime("%Y-%m-%d")
 
@@ -1192,7 +1152,7 @@ async def handle_appt_show_list(update: Update, context: ContextTypes.DEFAULT_TY
             for a in appts:
                 status_icon = "🟢" if not a.get("completed") else "⚪"
                 appt_date = str(a.get("date"))
-                appt_time = str(a.get("time", "09:00:00"))[:5]
+                appt_time = str(a.get("time", "07:00:00"))[:5]
                 if appt_date == tomorrow_str:
                     tomorrow_appts.append((a.get("title", "ពិនិត្យផ្ទៃពោះ"), appt_time))
                 lines.append(
@@ -1210,7 +1170,7 @@ async def handle_appt_show_list(update: Update, context: ContextTypes.DEFAULT_TY
             for a in appts:
                 status_icon = "🟢" if not a.get("completed") else "⚪"
                 appt_date = str(a.get("date"))
-                appt_time = str(a.get("time", "09:00:00"))[:5]
+                appt_time = str(a.get("time", "07:00:00"))[:5]
                 if appt_date == tomorrow_str:
                     tomorrow_appts.append((a.get("title", "Prenatal Checkup"), appt_time))
                 lines.append(
@@ -1237,18 +1197,29 @@ async def handle_appt_show_list(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 async def handle_appt_book_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Prompts user to book an appointment by typing title and date."""
+    """Starts step-by-step appointment booking: asks for title first."""
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
     session = get_user_session(user_id)
     lang = session["lang"]
-    session["awaiting_input"] = "appointment"
+
+    # Initialize appointment creation draft
+    session["appointment_draft"] = {}
+    session["awaiting_input"] = "appt_title"
 
     if lang == "kh":
-        text = "📅 *កក់ការណាត់ជួបថ្មី*\n\nសូមវាយបញ្ចូលព័ត៌មានការណាត់ជួបរបស់អ្នកតាមទម្រង់ខាងក្រោម៖\n*(ចំណងជើង | កាលបរិច្ឆេទ YYYY-MM-DD)*\n\nឧទាហរណ៍៖ `ពិនិត្យផ្ទៃពោះត្រីមាសទី២ | 2026-11-15`"
+        text = (
+            "📅 *កក់ការណាត់ជួបថ្មី (ជំហានទី ១/៤)*\n\n"
+            "សូមផ្ញើឈ្មោះ ឬ *ចំណងជើងនៃការណាត់ជួប* របស់អ្នកមកកាន់ឆាតនេះ៖\n"
+            "📌 *ទម្រង់/ឧទាហរណ៍៖* `ពិនិត្យផ្ទៃពោះត្រីមាសទី២`"
+        )
     else:
-        text = "📅 *Book New Appointment*\n\nPlease type your appointment details in this format:\n*(Title | YYYY-MM-DD)*\n\nExample: `Routine ANC Checkup | 2026-11-15`"
+        text = (
+            "📅 *Book New Appointment (Step 1 of 4)*\n\n"
+            "Please send the *Appointment Title* in this chat:\n"
+            "📌 *Format / Example:* `Routine ANC Checkup`"
+        )
 
     await query.message.reply_text(text, parse_mode="Markdown")
 
@@ -1477,7 +1448,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             return
 
         appts = db.get_mother_appointments(mother_id)
-        today = datetime.now().date()
+        today = datetime.now(CAMBODIA_TZ).date()
         tomorrow = today + timedelta(days=1)
         tomorrow_str = tomorrow.strftime("%Y-%m-%d")
         tomorrow_appts = []
@@ -1490,7 +1461,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 for a in appts:
                     status_icon = "🟢" if not a.get("completed") else "⚪"
                     appt_date = str(a.get("date"))
-                    appt_time = str(a.get("time", "09:00:00"))[:5]
+                    appt_time = str(a.get("time", "07:00:00"))[:5]
                     if appt_date == tomorrow_str:
                         tomorrow_appts.append((a.get("title", "ពិនិត្យផ្ទៃពោះ"), appt_time))
                     lines.append(
@@ -1508,7 +1479,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 for a in appts:
                     status_icon = "🟢" if not a.get("completed") else "⚪"
                     appt_date = str(a.get("date"))
-                    appt_time = str(a.get("time", "09:00:00"))[:5]
+                    appt_time = str(a.get("time", "07:00:00"))[:5]
                     if appt_date == tomorrow_str:
                         tomorrow_appts.append((a.get("title", "Prenatal Checkup"), appt_time))
                     lines.append(
@@ -1528,8 +1499,8 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             await update.message.reply_text(reminder_chat, parse_mode="Markdown")
         return
 
-    if user_text in ["🚨 Emergency SOS", "🚨 សង្គ្រោះបន្ទាន់ (SOS)"]:
-        await handle_emergency_sos(update, context)
+    if user_text in ["⏰ Reminders", "⏰ ការរំលឹក"]:
+        await handle_reminders(update, context)
         return
 
     if user_text in ["🍎 Pregnancy Guide (AI)", "🍎 មគ្គុទ្ទេសក៍សុខភាព"]:
@@ -1540,93 +1511,124 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         await send_language_picker(update.message)
         return
 
-    # 3. Handle Awaiting Inputs (Weight or Symptom logging)
-    if session.get("awaiting_input") == "weight":
+    # 3. Handle Awaiting Inputs (Weight, Appointment Wizard, or Symptom logging)
+    if session.get("awaiting_input") in ["appt_title", "appt_date", "appt_facility", "appt_doctor"]:
         if not mother_id:
-            await send_connect_prompt(update, context, "កត់ត្រាទម្ងន់", "Log Weight")
+            await send_connect_prompt(update, context, "កក់ការណាត់ជួប", "Book Appointment")
             return
-        match = re.search(r"(\d+(\.\d+)?)", user_text)
-        if match:
-            new_weight = float(match.group(1))
-            db.update_mother_weight(mother_id, new_weight)
+
+        step = session.get("awaiting_input")
+
+        if step == "appt_title":
+            session["appt_draft"] = {"title": user_text}
+            session["awaiting_input"] = "appt_date"
+            if lang == "kh":
+                prompt_msg = (
+                    "📅 *កក់ការណាត់ជួបថ្មី (ជំហានទី ២/៤)*\n\n"
+                    f"• ចំណងជើង៖ *{user_text}*\n\n"
+                    "សូមផ្ញើ *កាលបរិច្ឆេទ* នៃការណាត់ជួបមកកាន់ឆាតនេះ៖\n"
+                    "📌 *ទម្រង់/ឧទាហរណ៍៖* `2026-11-15` (ឆ្នាំ-ខែ-ថ្ងៃ)"
+                )
+            else:
+                prompt_msg = (
+                    "📅 *Book New Appointment (Step 2 of 4)*\n\n"
+                    f"• Title: *{user_text}*\n\n"
+                    "Please send the *Appointment Date* in this chat:\n"
+                    "📌 *Format / Example:* `2026-11-15` (YYYY-MM-DD)"
+                )
+            await update.message.reply_text(prompt_msg, parse_mode="Markdown")
+            return
+
+        elif step == "appt_date":
+            session["appt_draft"]["date"] = user_text
+            session["awaiting_input"] = "appt_facility"
+            if lang == "kh":
+                prompt_msg = (
+                    "📅 *កក់ការណាត់ជួបថ្មី (ជំហានទី ៣/៤)*\n\n"
+                    f"• ចំណងជើង៖ *{session['appt_draft'].get('title')}*\n"
+                    f"• កាលបរិច្ឆេទ៖ *{user_text}*\n\n"
+                    "សូមផ្ញើឈ្មោះ *មន្ទីរពេទ្យ ឬគ្លីនិក* មកកាន់ឆាតនេះ៖\n"
+                    "📌 *ទម្រង់/ឧទាហរណ៍៖* `មន្ទីរពេទ្យកាល់ម៉ែត (Calmette Hospital)`"
+                )
+            else:
+                prompt_msg = (
+                    "📅 *Book New Appointment (Step 3 of 4)*\n\n"
+                    f"• Title: *{session['appt_draft'].get('title')}*\n"
+                    f"• Date: *{user_text}*\n\n"
+                    "Please send the *Hospital or Clinic Facility name* in this chat:\n"
+                    "📌 *Format / Example:* `Calmette Hospital, Phnom Penh`"
+                )
+            await update.message.reply_text(prompt_msg, parse_mode="Markdown")
+            return
+
+        elif step == "appt_facility":
+            session["appt_draft"]["facility"] = user_text
+            session["awaiting_input"] = "appt_doctor"
+            if lang == "kh":
+                prompt_msg = (
+                    "📅 *កក់ការណាត់ជួបថ្មី (ជំហានទី ៤/៤)*\n\n"
+                    f"• ចំណងជើង៖ *{session['appt_draft'].get('title')}*\n"
+                    f"• កាលបរិច្ឆេទ៖ *{session['appt_draft'].get('date')}*\n"
+                    f"• មន្ទីរពេទ្យ៖ *{user_text}*\n\n"
+                    "សូមផ្ញើឈ្មោះ *វេជ្ជបណ្ឌិត* មកកាន់ឆាតនេះ៖\n"
+                    "📌 *ទម្រង់/ឧទាហរណ៍៖* `វេជ្ជបណ្ឌិត សុភី (Dr. Sophy)`"
+                )
+            else:
+                prompt_msg = (
+                    "📅 *Book New Appointment (Step 4 of 4)*\n\n"
+                    f"• Title: *{session['appt_draft'].get('title')}*\n"
+                    f"• Date: *{session['appt_draft'].get('date')}*\n"
+                    f"• Facility: *{user_text}*\n\n"
+                    "Please send the *Doctor's Name* in this chat:\n"
+                    "📌 *Format / Example:* `Dr. Sophy (OB/GYN)`"
+                )
+            await update.message.reply_text(prompt_msg, parse_mode="Markdown")
+            return
+
+        elif step == "appt_doctor":
+            draft = session.get("appt_draft", {})
+            draft["doctor"] = user_text
             session["awaiting_input"] = None
-            msg = (
-                f"✅ បានកត់ត្រាទម្ងន់ *{new_weight} kg* ទៅកាន់គេហទំព័រដោយជោគជ័យ! ⚖️"
-                if lang == "kh"
-                else f"✅ Successfully updated your weight to *{new_weight} kg* on the website! ⚖️"
+            session["appt_draft"] = None
+
+            success = db.save_appointment(
+                mother_profile_id=mother_id,
+                title=draft.get("title", "Prenatal Checkup"),
+                appt_date=draft.get("date", datetime.now().strftime("%Y-%m-%d")),
+                hospital=draft.get("facility", "Calmette Hospital"),
+                doctor=draft.get("doctor", "Dr. Sophy"),
+                appt_type="ANC"
             )
+
+            if success:
+                if lang == "kh":
+                    msg = (
+                        "✅ *បានកក់ការណាត់ជួបជោគជ័យ!*\n\n"
+                        f"• 📌 ចំណងជើង: {draft.get('title')}\n"
+                        f"• 📅 កាលបរិច្ឆេទ: {draft.get('date')}\n"
+                        f"• 🏥 មន្ទីរពេទ្យ: {draft.get('facility')}\n"
+                        f"• 👨‍⚕️ វេជ្ជបណ្ឌិត: {draft.get('doctor')}\n\n"
+                        "ទិន្នន័យត្រូវបានរក្សាទុកទៅកាន់គេហទំព័ររួចរាល់។ 📅"
+                    )
+                else:
+                    msg = (
+                        "✅ *Appointment Booked Successfully!*\n\n"
+                        f"• 📌 Title: {draft.get('title')}\n"
+                        f"• 📅 Date: {draft.get('date')}\n"
+                        f"• 🏥 Facility: {draft.get('facility')}\n"
+                        f"• 👨‍⚕️ Doctor: {draft.get('doctor')}\n\n"
+                        "Synced with website records. 📅"
+                    )
+            else:
+                msg = "❌ Error booking appointment. Please try again."
+
             await update.message.reply_text(
                 msg,
                 parse_mode="Markdown",
                 reply_markup=get_permanent_keyboard(lang),
             )
-        else:
-            err = "⚠️ សូមវាយបញ្ចូលលេខទម្ងន់ត្រឹមត្រូវ (ឧ. 54.5)៖" if lang == "kh" else "⚠️ Please enter a valid number (e.g. 54.5):"
-            await update.message.reply_text(err)
-        return
-
-    if session.get("awaiting_input") == "appointment":
-        if not mother_id:
-            await send_connect_prompt(update, context, "កក់ការណាត់ជួប", "Book Appointment")
             return
 
-        parts = [p.strip() for p in user_text.split("|")]
-        title = parts[0] if len(parts) > 0 and parts[0] else ("Prenatal Checkup" if lang == "en" else "ពិនិត្យផ្ទៃពោះ")
-        date_str = parts[1] if len(parts) > 1 else datetime.now().strftime("%Y-%m-%d")
-
-        success = db.save_appointment(
-            mother_profile_id=mother_id,
-            title=title,
-            appt_date=date_str,
-            hospital="Calmette Hospital",
-            doctor="Dr. Sophy",
-            appt_type="ANC"
-        )
-        session["awaiting_input"] = None
-        if success:
-            msg = (
-                f"✅ *បានកក់ការណាត់ជួបជោគជ័យ!*\n\n• ចំណងជើង: {title}\n• កាលបរិច្ឆេទ: {date_str}\n\nទិន្នន័យត្រូវបានរក្សាទុកទៅកាន់គេហទំព័ររួចរាល់។ 📅"
-                if lang == "kh"
-                else f"✅ *Appointment Booked Successfully!*\n\n• Title: {title}\n• Date: {date_str}\n\nSynced with website records. 📅"
-            )
-        else:
-            msg = "❌ Error booking appointment. Please try again."
-
-        await update.message.reply_text(
-            msg,
-            parse_mode="Markdown",
-            reply_markup=get_permanent_keyboard(lang),
-        )
-        return
-        if not mother_id:
-            await send_connect_prompt(update, context, "កត់ត្រារោគសញ្ញា", "Log Symptom")
-            return
-        patient_ctx = db.get_mother_full_profile(mother_id)
-        current_week = patient_ctx.get("current_week") if patient_ctx else None
-        trimester = patient_ctx.get("trimester") if patient_ctx else None
-
-        db.save_medical_record(
-            mother_profile_id=mother_id,
-            title="Daily Symptom Log" if lang == "en" else "កំណត់ត្រារោគសញ្ញាប្រចាំថ្ងៃ",
-            category="doctor_note",
-            notes=user_text,
-            week=current_week,
-            trimester=trimester,
-            status="normal",
-            extracted_data={"patient_reported_symptom": user_text},
-        )
-        session["awaiting_input"] = None
-        msg = (
-            "✅ បានកត់ត្រារោគសញ្ញារបស់អ្នកទៅកាន់ប្រព័ន្ធគេហទំព័រជោគជ័យ! វេជ្ជបណ្ឌិតអាចពិនិត្យតាមដានបាន។ 🩺"
-            if lang == "kh"
-            else "✅ Your symptom note has been logged to your website health records for your doctor to review! 🩺"
-        )
-        await update.message.reply_text(
-            msg,
-            parse_mode="Markdown",
-            reply_markup=get_permanent_keyboard(lang),
-        )
-        return
 
     # 4. Direct typed phone number linking
     if is_phone_number_text(user_text):

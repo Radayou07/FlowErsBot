@@ -544,7 +544,7 @@ def save_appointment(
     mother_profile_id: str,
     title: str,
     appt_date: str,
-    appt_time: str = "09:00:00",
+    appt_time: str = "07:00:00",
     hospital: str = "Calmette Hospital",
     doctor: str = "Dr. Sophy",
     appt_type: str = "ANC",
@@ -597,6 +597,32 @@ def save_appointment(
         "completed": False
     })
     return True
+
+
+def update_mother_weight(mother_profile_id: str, weight_kg: float) -> bool:
+    """Updates the mother's pre_pregnancy_weight_kg in mother_profiles."""
+    conn = get_db_connection()
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE mother_profiles SET pre_pregnancy_weight_kg = %s WHERE id = %s",
+                    (weight_kg, mother_profile_id)
+                )
+            conn.commit()
+            return True
+        except Exception as e:
+            print(f"[DB Error updating weight: {e}]")
+            return False
+        finally:
+            conn.close()
+
+    # Fallback demo update
+    m = FALLBACK_DATA["mother_profiles"].get(mother_profile_id)
+    if m:
+        m["pre_pregnancy_weight_kg"] = weight_kg
+        return True
+    return False
 
 
 # ---------------------------------------------------------------------------
