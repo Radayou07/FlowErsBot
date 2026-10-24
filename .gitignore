@@ -6,3 +6,4 @@ uploads/
 termina.py
 TODO.md
 database.db
+__pycache__

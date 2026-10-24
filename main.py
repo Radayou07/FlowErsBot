@@ -1430,11 +1430,20 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         user_id = update.effective_user.id
         session = get_user_session(user_id)
         lang = session["lang"]
-        session["awaiting_input"] = "appointment"
+        session["appointment_draft"] = {}
+        session["awaiting_input"] = "appt_title"
         if lang == "kh":
-            text = "📅 *កក់ការណាត់ជួបថ្មី*\n\nសូមវាយបញ្ចូលព័ត៌មានការណាត់ជួបរបស់អ្នកតាមទម្រង់ខាងក្រោម៖\n*(ចំណងជើង | កាលបរិច្ឆេទ YYYY-MM-DD)*\n\nឧទាហរណ៍៖ `ពិនិត្យផ្ទៃពោះត្រីមាសទី២ | 2026-11-15`"
+            text = (
+                "📅 *កក់ការណាត់ជួបថ្មី (ជំហានទី ១/៤)*\n\n"
+                "សូមផ្ញើឈ្មោះ ឬ *ចំណងជើងនៃការណាត់ជួប* របស់អ្នកមកកាន់ឆាតនេះ៖\n"
+                "📌 *ទម្រង់/ឧទាហរណ៍៖* `ពិនិត្យផ្ទៃពោះត្រីមាសទី២`"
+            )
         else:
-            text = "📅 *Book New Appointment*\n\nPlease type your appointment details in this format:\n*(Title | YYYY-MM-DD)*\n\nExample: `Routine ANC Checkup | 2026-11-15`"
+            text = (
+                "📅 *Book New Appointment (Step 1 of 4)*\n\n"
+                "Please send the *Appointment Title* in this chat:\n"
+                "📌 *Format / Example:* `Routine ANC Checkup`"
+            )
         await update.message.reply_text(text, parse_mode="Markdown")
         return
 
@@ -1540,13 +1549,30 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             return
 
         elif step == "appt_date":
-            session["appt_draft"]["date"] = user_text
+            # Validate date format YYYY-MM-DD
+            try:
+                datetime.strptime(user_text.strip(), "%Y-%m-%d")
+            except ValueError:
+                if lang == "kh":
+                    err_msg = (
+                        "❌ *ទម្រង់កាលបរិច្ឆេទមិនត្រឹមត្រូវទេ! (ឧ. 100-13-32)*\n\n"
+                        "សូមវាយបញ្ចូលកាលបរិច្ឆេទឱ្យបានត្រឹមត្រូវតាមទម្រង់ *YYYY-MM-DD* (ឆ្នាំ-ខែ-ថ្ងៃ) ឧទាហរណ៍៖ `2026-11-15`៖"
+                    )
+                else:
+                    err_msg = (
+                        "❌ *Invalid Date Format! (e.g. 100-13-32)*\n\n"
+                        "Please enter a valid date in format *YYYY-MM-DD* (Year-Month-Day), e.g., `2026-11-15`:"
+                    )
+                await update.message.reply_text(err_msg, parse_mode="Markdown")
+                return
+
+            session["appt_draft"]["date"] = user_text.strip()
             session["awaiting_input"] = "appt_facility"
             if lang == "kh":
                 prompt_msg = (
                     "📅 *កក់ការណាត់ជួបថ្មី (ជំហានទី ៣/៤)*\n\n"
                     f"• ចំណងជើង៖ *{session['appt_draft'].get('title')}*\n"
-                    f"• កាលបរិច្ឆេទ៖ *{user_text}*\n\n"
+                    f"• កាលបរិច្ឆេទ៖ *{user_text.strip()}*\n\n"
                     "សូមផ្ញើឈ្មោះ *មន្ទីរពេទ្យ ឬគ្លីនិក* មកកាន់ឆាតនេះ៖\n"
                     "📌 *ទម្រង់/ឧទាហរណ៍៖* `មន្ទីរពេទ្យកាល់ម៉ែត (Calmette Hospital)`"
                 )
@@ -1554,7 +1580,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 prompt_msg = (
                     "📅 *Book New Appointment (Step 3 of 4)*\n\n"
                     f"• Title: *{session['appt_draft'].get('title')}*\n"
-                    f"• Date: *{user_text}*\n\n"
+                    f"• Date: *{user_text.strip()}*\n\n"
                     "Please send the *Hospital or Clinic Facility name* in this chat:\n"
                     "📌 *Format / Example:* `Calmette Hospital, Phnom Penh`"
                 )
